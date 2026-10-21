@@ -184,3 +184,37 @@ Podczas wdrażania i konfiguracji laboratoryjnej napotkano i rozwiązano następ
 * **Detection Engineering:** Pisanie reguł XML, obsługa wyrażeń regularnych (Regex), korelacja zdarzeń, mapowanie MITRE ATT&CK.
 * **Web Security:** Zrozumienie wektorów OWASP Top 10 (SQLi, XSS, Path Traversal, Brute-Force).
 * **Infrastruktura:** Linux, Docker, VMware Workstation, SSH, testowanie reguł za pomocą CLI i interfejsu.
+
+---
+
+## 9. Automatyzacja blokowania podejrzanych IP (Python)
+
+W repozytorium dodano skrypt `wazuh_auto_block.py`, który:
+1. Loguje się do API Wazuh.
+2. Pobiera alerty.
+3. Filtruje je po `rule.id`, `rule.level` i oknie czasowym.
+4. Wyszukuje źródłowe adresy IP.
+5. Wywołuje **Active Response** do blokowania IP (lub działa w trybie dry-run).
+
+### Szybki start
+
+```bash
+export WAZUH_BASE_URL="https://<WAZUH_SERVER>:55000"
+export WAZUH_USERNAME="wazuh"
+export WAZUH_PASSWORD="<HASLO_API>"
+
+# Tryb bez zmian (podgląd)
+python3 wazuh_auto_block.py --no-verify-ssl
+
+# Realne blokowanie IP
+python3 wazuh_auto_block.py --no-verify-ssl --execute-block
+```
+
+### Najważniejsze parametry
+
+- `--rule-ids` (domyślnie: `100011,100013,100014,100015`)
+- `--min-level` (domyślnie: `10`)
+- `--lookback-minutes` (domyślnie: `15`)
+- `--agent-id` (domyślnie: `001`)
+- `--block-command` (domyślnie: `firewall-drop`)
+- `--execute-block` (bez tej flagi skrypt działa jako dry-run)
