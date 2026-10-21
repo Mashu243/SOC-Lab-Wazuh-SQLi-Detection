@@ -45,17 +45,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--base-url",
-        default=os.getenv("WAZUH_BASE_URL", "https://127.0.0.1:55000"),
+        default=os.getenv("WAZUH_BASE_URL", "https://192.168.118.133:55000"),
         help="Adres API Wazuh, np. https://wazuh.local:55000",
     )
     parser.add_argument(
         "--username",
-        default=os.getenv("WAZUH_USERNAME", "wazuh"),
+        default=os.getenv("WAZUH_USERNAME", "wazuh-wui"),
         help="Użytkownik API Wazuh",
     )
     parser.add_argument(
         "--password",
-        default=os.getenv("WAZUH_PASSWORD"),
+        default=os.getenv("WAZUH_PASSWORD","MyS3cr37P450r.*-"),
         help="Hasło API Wazuh",
     )
     parser.add_argument(
