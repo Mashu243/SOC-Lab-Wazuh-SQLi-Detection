@@ -2,108 +2,71 @@
 
 ![SIEM](https://img.shields.io/badge/SIEM-Wazuh-blue?style=for-the-badge)
 ![Environment](https://img.shields.io/badge/Lab-VMware%20%7C%20Docker-informational?style=for-the-badge)
-![OS](https://img.shields.io/badge/OS-Ubuntu%20%7C%20Kali%20Linux-blueviolet?style=for-the-badge)
-![MITRE](https://img.shields.io/badge/MITRE%20ATT%26CK-T1190%20%7C%20T1083%20%7C%20T1059-red?style=for-the-badge)
+![OS](https://img.shields.io/badge/OS-Ubuntu%20%7C%20Kali%20Linux%20%7C%20Windows%2010-blueviolet?style=for-the-badge)
+![MITRE](https://img.shields.io/badge/MITRE%20ATT%26CK-T1190%20%7C%20T1083%20%7C%20T1059%20%7C%20T1003.001-red?style=for-the-badge)
 
 ##  1. Cel projektu 
 Celem projektu było zaprojektowanie, wdrożenie oraz przetestowanie środowiska **Security Operations Center (SOC)** w warunkach laboratoryjnych. Projekt odzwierciedla pełny cykl pracy analityka SOC Tier 1 oraz Detection Engineera:
-1. Zbudowanie architektury zbierania logów z podatnej aplikacji webowej (**OWASP Juice Shop**) działającej w kontenerze Docker.
-2. Przeprowadzenie kontrolowanych symulacji ataków webowych (**SQL Injection**, **Directory Brute-Force**, **Path Traversal**, **XSS**) z maszyny atakującego (Kali Linux).
+1. Zbudowanie architektury zbierania logów z podatnej aplikacji webowej (**OWASP Juice Shop**) oraz stacji roboczej (**Windows 10** z Sysmonem).
+2. Przeprowadzenie kontrolowanych symulacji ataków webowych (SQLi, XSS, Path Traversal) oraz ataków na endpoint (OS Credential Dumping - LSASS) przy użyciu **Atomic Red Team**.
 3. Analizę surowej telemetrii i identyfikację wskaźników kompromitacji (IoC).
-4. Opracowanie własnych reguł detekcji i korelacji czasowej w języku XML dla silnika **Wazuh SIEM** wraz z mapowaniem do matrycy **MITRE ATT&CK**.
+4. Opracowanie własnych reguł detekcji w języku XML, korelacja zdarzeń oraz mapowanie logiki do matrycy **MITRE ATT&CK**.
 
 ---
 
 ##  2. Architektura Laboratorium
 
-Środowisko zostało zwirtualizowane przy użyciu hiperwizora **VMware Workstation** i podzielone na dwa główne segmenty:
+Środowisko zostało zwirtualizowane przy użyciu hiperwizora **VMware Workstation** i podzielone na segmenty:
 
 | Komponent | System / Technologia | Rola w środowisku |
 | :--- | :--- | :--- |
-| **Wazuh Server (SIEM)** | Ubuntu Server (Docker Compose) | Centralny menedżer logów (`wazuh-manager`), silnik analityczny, indeksowanie oraz wizualizacja w OpenSearch Dashboards. |
-| **Monitorowany Host & Cel** | Kali Linux (`kali-endpoint`) | Host z zainstalowanym agentem Wazuh, na którym uruchomiono cel ataków – aplikację **OWASP Juice Shop** (Node.js / SQLite). |
-
-### Przepływ telemetrii:
-```text
-[Atak z Kali Linux] ──> [Kontener Docker: OWASP Juice Shop] 
-                              │
-                              ▼ (Przekierowanie strumienia stdout/stderr)
-                  [/var/log/juiceshop/access.log]
-                              │
-                              ▼ (Wazuh Agent: localfile syslog)
-                  [Wazuh Manager: Analiza i Korelacja XML]
-                              │
-                              ▼ (Wazuh Indexer / OpenSearch)
-                  [Alert w Dashboardzie SOC + MITRE Mapping]
-```
+| **Wazuh Server (SIEM)** | Ubuntu Server (Docker Compose) | Centralny menedżer logów (`wazuh-manager`), silnik analityczny, indeksowanie oraz wizualizacja. |
+| **Monitorowany Host Web** | Kali Linux (`kali-endpoint`) | Host uruchamiający cel ataków webowych – **OWASP Juice Shop** (Node.js / SQLite). |
+| **Monitorowany Endpoint** | Windows 10 | Stacja robocza z wdrożonym systemem **Sysmon**, cel testów Atomic Red Team (kradzież poświadczeń). |
 
 ---
 
-## 3. Konfiguracja potoku logów
+## 3. Konfiguracja potoku logów (Web & Endpoint)
 
-Aby zapewnić ciągłe przekazywanie zdarzeń z aplikacji OWASP Juice Shop do agenta Wazuh, skonfigurowano strumieniowanie wyjścia kontenera do dedykowanego pliku dziennika na hoście Kali Linux:
-
+### Logi aplikacyjne (Juice Shop / Kali):
+Strumieniowanie wyjścia kontenera do dedykowanego pliku dziennika na hoście Kali Linux:
 ```bash
 sudo su -
 mkdir -p /var/log/juiceshop
 docker logs -f juiceshop >> /var/log/juiceshop/access.log 2>&1 &
 ```
+W pliku `ossec.conf` dodano monitorowanie (`<log_format>syslog</log_format>`).
 
-W pliku konfiguracyjnym agenta Wazuh (`/var/ossec/etc/ossec.conf`) zdefiniowano monitorowanie utworzonego pliku:
-
+### Logi endpointowe (Sysmon / Windows 10):
+Zainstalowano agenta Wazuh oraz system Sysmon (z dedykowaną konfiguracją XML). W pliku `ossec.conf` na maszynie Windows zdefiniowano subskrypcję kanału zdarzeń:
 ```xml
 <localfile>
-  <log_format>syslog</log_format>
-  <location>/var/log/juiceshop/access.log</location>
+  <location>Microsoft-Windows-Sysmon/Operational</location>
+  <log_format>eventchannel</log_format>
 </localfile>
 ```
 
 ---
 
-##  4. Symulacja Ataku i Analiza Wskaźników
+##  4. Symulacja Ataku i Analiza Wskaźników (Web)
 
-### Wektor ataku:
 Przeprowadzono próbę manipulacji zapytaniem bazodanowym w endpoincie wyszukiwarki produktów za pomocą ładunku SQL Injection:
-
 ```bash
 curl -s "http://localhost:3000/rest/products/search?q='''%20OR%201=1--" > /dev/null
 ```
-
-### Analiza surowego logu (IoC):
-Brak parametryzacji zapytania po stronie aplikacji wywołał błąd wykonania silnika bazy danych SQLite, który został zarejestrowany w strumieniu logów:
-```text
-Error: SQLITE_ERROR: incomplete input
-```
+Brak parametryzacji zapytania wywołał błąd wykonania silnika SQLite, zarejestrowany w strumieniu: `Error: SQLITE_ERROR: incomplete input`.
 
 * **Widok z perspektywy atakującego (Kali Linux):**  
   ![Terminal Kali - Ataki](wazuh_img/kali_attacks.png)
 
 ---
 
-##  5. Inżynieria Detekcji
+##  5. Inżynieria Detekcji (Reguły Customowe)
 
-W celu automatyzacji wykrywania zagrożeń i odróżnienia pojedynczych błędów od zautomatyzowanego skanowania, wdrożono zestaw autorskich reguł w pliku `/var/ossec/etc/rules/juiceshop_rules.xml` (przetestowanych i zweryfikowanych za pomocą wbudowanego modułu *Ruleset Test*).
-
-### Zaimplementowane reguły detekcyjne:
+Wdrożono zestaw autorskich reguł w pliku `juiceshop_rules.xml`. Przykład dla korelacji zautomatyzowanego skanowania katalogów:
 
 ```xml
-<group name="web,app,juiceshop_detection">
-
-  <!-- 1. SQL INJECTION (Pojedynczy błąd oraz korelacja czasowa) -->
-  <rule id="100010" level="5">
-    <match>SQLITE_ERROR</match>
-    <description>Juice Shop: Wykryto pojedynczy blad zapytania SQL</description>
-  </rule>
-
-  <rule id="100011" level="12" frequency="5" timeframe="60">
-    <if_matched_sid>100010</if_matched_sid>
-    <description>Juice Shop: Wielokrotne bledy SQL (automatyczny atak SQLi)</description>
-    <mitre>
-      <id>T1190</id>
-    </mitre>
-  </rule>
-
-  <!-- 2. DIRECTORY BRUTE-FORCE (Skanowanie zasobów - seria HTTP 404) -->
+  <!-- DIRECTORY BRUTE-FORCE -->
   <rule id="100012" level="3">
     <match> 404 </match>
     <description>Juice Shop: Zasob nie zostal odnaleziony (HTTP 404)</description>
@@ -116,88 +79,70 @@ W celu automatyzacji wykrywania zagrożeń i odróżnienia pojedynczych błędó
       <id>T1083</id>
     </mitre>
   </rule>
-
-  <!-- 3. PATH TRAVERSAL (Próba wyjścia poza katalog główny) -->
-  <rule id="100014" level="11">
-    <regex>\.\./|%2e%2e%2f|%2e%2e/</regex>
-    <description>Juice Shop: Wykryto probe ataku Directory / Path Traversal</description>
-    <mitre>
-      <id>T1083</id>
-    </mitre>
-  </rule>
-
-  <!-- 4. CROSS-SITE SCRIPTING (XSS) -->
-  <rule id="100015" level="10">
-    <regex>script>|%3Cscript|onerror=|javascript:|alert\(</regex>
-    <description>Juice Shop: Wykryto probe ataku Cross-Site Scripting (XSS)</description>
-    <mitre>
-      <id>T1059.007</id>
-    </mitre>
-  </rule>
-
-</group>
 ```
-
 * **Widok reguł w Wazuh Dashboard:**  
   ![Niestandardowe reguły Wazuh](wazuh_img/custom_rules.png)
 
-* **Walidacja w module Ruleset Test:**  
-  ![Test reguł](wazuh_img/rules_test.png)
+---
+
+##  6. Symulacja i Detekcja Kradzieży Poświadczeń (Windows LSASS)
+
+W ramach testowania bezpieczeństwa stacji roboczej (Endpoint Security), wykorzystano framework **Atomic Red Team** do przeprowadzenia symulacji zrzutu pamięci procesu LSASS (Technika MITRE: **T1003.001**). Testy wykonano w systemie Windows 10 z zainstalowanym Sysmonem (Event ID 10 - ProcessAccess).
+
+Wykonano trzy warianty ataku:
+
+**Wariant 1: Użycie narzędzia ProcDump (T1003.001-1)**
+![Zrzut ProcDump](wazuh_img/lsass_dump.png)
+
+**Wariant 2: Użycie systemowej biblioteki comsvcs.dll - LoLBin (T1003.001-2)**
+![Zrzut comsvcs](wazuh_img/lsass_dump2.png)
+
+**Wariant 3: Użycie bezpośrednich wywołań systemowych i unhookingu API (T1003.001-3)**
+![Zrzut Dumpert](wazuh_img/lsass_dump3.png)
+
+### Wynik Detekcji w Wazuh SIEM
+Analiza w panelu *Threat Hunting* udowodniła, że Wazuh poprawnie interpretuje telemetrię z Sysmona. System zareagował alertami o **poziomie krytycznym (Level 12)** na podstawie potężnej, wbudowanej reguły `92900`, skutecznie flagując warianty oparte na zewnętrznych payloadach (np. ProcDump).
+
+* **Detekcja dostępu do LSASS w panelu Wazuh:**  
+  ![Detekcja LSASS](wazuh_img/attacks_lsass.png)
 
 ---
 
-##  6. Wizualizacja i Triage w Dashboardzie (Threat Hunting)
+##  7. Wizualizacja i Triage w Dashboardzie (Threat Hunting)
 
-Zdarzenia napływające z agenta są na bieżąco korelowane i prezentowane w module *Threat Hunting* systemu Wazuh. 
-
+Zdarzenia napływające z agentów są na bieżąco korelowane i prezentowane w module *Threat Hunting*.
 * **Zarejestrowane alerty w panelu Discover:**  
   ![Alerty Wazuh](wazuh_img/wazuh_logs.png)
   ![Alerty Wazuh2](wazuh_img/wazuh_logs2.png)
-
-* **Podsumowanie analityczne:**
-  * Silnik pomyślnie wykrył próby wstrzykiwania kodu SQL, klasyfikując je do techniki **MITRE ATT&CK T1190** (*Exploit Public-Facing Application*).
-  * Zastosowanie reguł korelacyjnych opartych na oknie czasowym (`timeframe` i `frequency`) skutecznie podnosi priorytet zdarzeń w przypadku wykrycia zautomatyzowanego skanowania.
-
----
-
-##  7. Rekomendacje Naprawcze 
-1. **AppSec:** Wdrożenie sparametryzowanych zapytań (*Prepared Statements*) w celu całkowitego wyeliminowania podatności SQL Injection w aplikacji.
-2. **Network/WAF:** Skonfigurowanie zapory Web Application Firewall (WAF) do blokowania ciągów znaków charakterystycznych dla ataków XSS i Path Traversal na brzegu sieci.
-3. **SIEM / SOAR:** Implementacja reguł automatycznej reakcji (*Active Response*) w Wazuh w celu blokowania adresów IP generujących serię incydentów o wysokim poziomie zagrożenia.
 
 ---
 
 ##  8. Napotkane problemy i Troubleshooting (Wnioski)
 
-Podczas wdrażania i konfiguracji laboratoryjnej napotkano i rozwiązano następujące wyzwania techniczne:
+Podczas wdrażania napotkano na problemy, których rozwiązanie dostarczyło cennej wiedzy z zakresu działania systemów SIEM oraz EDR:
 
-1. **Problem ze strumieniowaniem logów z Dockera (`docker logs` w tle):**
-   * *Objaw:* Proces uruchomiony z operatorem `&` oraz `sudo` zawieszał się ze statusem `suspended (tty input)`, ponieważ powłoka próbowała pytać o hasło w tle.
-   * *Rozwiązanie:* Uruchomienie sesji uprzywilejowanej (`sudo su -`) przed zainicjowaniem potoku logów wyeliminowało problem interaktywnego promptu hasła i pozwoliło na stabilne przekierowanie strumienia do pliku `/var/log/juiceshop/access.log`.
+1. **Konflikty w silniku analitycznym (Nadpisywanie reguł):**
+   * *Objaw:* Zdarzenia Sysmona z Windows 10 (Event ID 10) były błędnie klasyfikowane jako atak webowy *Path Traversal* dla Juice Shopu.
+   * *Rozwiązanie:* Zdiagnozowano problem przy użyciu narzędzia `wazuh-logtest`. Okazało się, że zbyt ogólna reguła dla Juice Shopu (szukająca znaków `../` lub `\`) przechwytywała ścieżki systemowe Windowsa (np. `C:\Windows\System32\rundll32.exe`). Wymusiło to uszczegółowienie reguł webowych (dodanie tagów `<match>GET|POST</match>`), co przywróciło prawidłową klasyfikację logów z endpointów.
 
-2. **Błędy walidacji parsera XML w Wazuh Dashboard (Błąd `1113` / `invalid token`):**
-   * *Objaw:* Webowy edytor reguł zgłaszał błąd składni przy użyciu encji specjalnych (np. `&lt;script`) wewnątrz znaczników `<regex>`.
-   * *Rozwiązanie:* Dostosowano wyrażenia regularne (zastępując znaki mniejszości uniwersalnymi wzorcami końcowymi, np. `script>`), co umożliwiło pomyślne przejście walidacji API i zapisanie reguł bez naruszania struktury drzewa XML.
----
-##  Wykorzystane kompetencje
-* **SIEM & Log Management:** Wazuh, OpenSearch Dashboards, analiza logów surowych.
-* **Detection Engineering:** Pisanie reguł XML, obsługa wyrażeń regularnych (Regex), korelacja zdarzeń, mapowanie MITRE ATT&CK.
-* **Web Security:** Zrozumienie wektorów OWASP Top 10 (SQLi, XSS, Path Traversal, Brute-Force).
-* **Infrastruktura:** Linux, Docker, VMware Workstation, SSH, testowanie reguł za pomocą CLI i interfejsu.
+2. **Ciche blokowanie procesów (LoLBins vs EDR/Defender):**
+   * *Objaw:* Wykonanie zrzutu pamięci wariantem drugim (`comsvcs.dll`) nie generowało alertów w SIEM, mimo prawidłowej składni reguł.
+   * *Rozwiązanie:* Analiza wykazała, że ataki typu LoLBin (wykorzystujące natywne pliki systemu operacyjnego) są agresywniej monitorowane przez mechanizmy ochronne Windows Defender i EDR. Proces był zabijany u źródła tak szybko, że system operacyjny nie zdążył wypchnąć zdarzenia "ProcessAccess" do dziennika Sysmona. Udowadnia to różnicę między błędem detekcji SIEM a skuteczną, natywną prewencją endpointa.
+
+3. **Problem z formatowaniem XML (Błąd `invalid token`):**
+   * Zastąpiono znaki specjalne HTML (np. `<script`) uniwersalnymi wzorcami Regex, aby parser XML menedżera nie odrzucał reguł customowych.
 
 ---
 
-## 9. Automatyzacja blokowania podejrzanych IP (Python)
+##  9. Automatyzacja blokowania podejrzanych IP (Python)
 
 W repozytorium dodano skrypt `wazuh_auto_block.py`, który:
 1. Loguje się do API Wazuh.
-2. Pobiera alerty.
-3. Filtruje je po `rule.id`, `rule.level` i oknie czasowym.
-4. Wyszukuje źródłowe adresy IP.
-5. Wywołuje **Active Response** do blokowania IP (lub działa w trybie dry-run).
+2. Pobiera alerty i filtruje je po `rule.id` i oknie czasowym.
+3. Wyszukuje źródłowe adresy IP.
+4. Wywołuje **Active Response** do blokowania IP (lub działa w trybie dry-run).
 
 ### Szybki start
-
 ```bash
 export WAZUH_BASE_URL="https://192.168.118.133:55000"
 export WAZUH_USERNAME="wazuh-wui"
@@ -209,12 +154,3 @@ python3 wazuh_auto_block.py --no-verify-ssl
 # Realne blokowanie IP
 python3 wazuh_auto_block.py --no-verify-ssl --execute-block
 ```
-
-### Najważniejsze parametry
-
-- `--rule-ids` (domyślnie: `100011,100013,100014,100015`)
-- `--min-level` (domyślnie: `10`)
-- `--lookback-minutes` (domyślnie: `15`)
-- `--agent-id` (domyślnie: `001`)
-- `--block-command` (domyślnie: `firewall-drop`)
-- `--execute-block` (bez tej flagi skrypt działa jako dry-run)
