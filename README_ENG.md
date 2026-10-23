@@ -155,17 +155,17 @@ Tests were conducted using the **Atomic Red Team** framework, and events were mo
 During the tests, LSASS process memory dump simulations were executed using various tools (LoLBins and external tools):
 
 *   **Memory dump using ProcDump (T1003.001-1):**
-    ![Zrzut ProcDump](lsass_dump.png)
+    ![Zrzut ProcDump](wazuh_img/lsass_dump.png)
 *   **Memory dump using the comsvcs.dll library (T1003.001-2):**
-    ![Zrzut comsvcs.dll](lsass_dump2.png)
+    ![Zrzut comsvcs.dll](wazuh_img/lsass_dump2.png)
 *   **Memory dump using direct system calls and API unhooking (T1003.001-3):**
-    ![Zrzut syscalls](lsass_dump3.png)
+    ![Zrzut syscalls](wazuh_img/lsass_dump3.png)
 
 ### Visualization in Wazuh Dashboard:
 The Wazuh system, relying on Sysmon logs (Event ID 10 - ProcessAccess), successfully identified and categorized the memory dump attempts, specifically when using external tools like ProcDump. The built-in rule with ID `92900`, assigned a critical level of 12, was triggered.
 
 *   **LSASS memory dump detection in the Threat Hunting panel:**
-    ![Detekcja LSASS w Wazuh](attacks_lsass.png)
+    ![Detekcja LSASS w Wazuh](wazuh_img/attacks_lsass.png)
 
 ---
 
