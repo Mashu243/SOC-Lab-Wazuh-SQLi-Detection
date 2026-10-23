@@ -144,7 +144,7 @@ W repozytorium dodano skrypt `wazuh_auto_block.py`, który:
 
 ### Szybki start
 ```bash
-export WAZUH_BASE_URL="https://192.168.118.133:55000"
+export WAZUH_BASE_URL="https://<WAZUH_IP>:55000"
 export WAZUH_USERNAME="wazuh-wui"
 export WAZUH_PASSWORD="<HASLO_API>"
 
